@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Weighted Ranked Choice Voting</title>
+  <style>
+    .choice-input {
+      display: inline-block;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse; /* Ensures borders between cells are merged */
+    }
+    th, td {
+      border: 1px solid black;
+      padding: 8px; /* Adds space around text in cells */
+      text-align: left;
+    }
+  </style>
+  
+</head>
+<body>
+  <div id="app">
+    <div id="settings-section">
+      <h2>Settings Section</h2>
+      <label for="choices">Total Voting Choices:</label>
+      <input type="number" id="choices">
+      <button onclick="addVotingChoices()">Update Voting Choices</button>
+      <div id="voting-choices"></div>
+    </div>
+
+    <div id="user-section">
+      <h2>User Section</h2>
+      <button onclick="addUser()">Add User</button>
+      <div id="users"></div>
+    </div>
+
+    <div id="voting-section">
+      <h2>Voting Section</h2>
+      <button onclick="computeWinner()">Compute</button>
+      <div id="winner"></div>
+      <div id="resultsTable"></div>
+    </div>
+  </div>
+
+  <script>
+    let users = [];
+    let votingChoices = [];
+
+    function saveToLocalStorage() {
+        localStorage.setItem('users', JSON.stringify(users));
+        localStorage.setItem('votingChoices', JSON.stringify(votingChoices));
+    }
+
+    function renderVotingChoices() {
+        const votingChoicesDiv = document.getElementById("voting-choices");
+        votingChoicesDiv.innerHTML = "";
+        votingChoices.forEach((choice, index) => {
+            const inputId = `choice-${index + 1}`;
+            votingChoicesDiv.innerHTML += `<label for="${inputId}" class="choice-input">Choice ${index + 1}:</label><input type="text" id="${inputId}" class="choice-input" value="${choice}" oninput="updateVotingChoices(${index}, this.value)"><br>`;
+        });
+    }
+
+
+    function loadFromLocalStorage() {
+        const storedUsers = localStorage.getItem('users');
+        const storedChoices = localStorage.getItem('votingChoices');
+        if (storedUsers) {
+            users = JSON.parse(storedUsers);
+            renderUsers();  // Render users after loading
+        }
+        if (storedChoices) {
+            votingChoices = JSON.parse(storedChoices);
+            renderVotingChoices();  // Render voting choices after loading
+        }
+    }
+
+    function addVotingChoices() {
+        const totalChoices = parseInt(document.getElementById("choices").value);
+        const votingChoicesDiv = document.getElementById("voting-choices");
+        votingChoicesDiv.innerHTML = "";
+        votingChoices = []; // Reset voting choices array
+        for (let i = 1; i <= totalChoices; i++) {
+            const inputId = `choice-${i}`;
+            votingChoicesDiv.innerHTML += `<label for="${inputId}" class="choice-input">Choice ${i}:</label><input type="text" id="${inputId}" class="choice-input" oninput="updateVotingChoices(${i - 1}, this.value)"><br>`;
+        }
+    }
+
+    function updateVotingChoices(index, value) {
+        votingChoices[index] = value;
+        saveToLocalStorage(); // Save every time a choice is updated
+    }
+
+
+    function addUser() {
+        users.push({ name: '', weight: '', votes: '' });
+        renderUsers();
+        saveToLocalStorage();  // Save after adding a user
+    }
+
+
+    function renderUsers() {
+        const usersDiv = document.getElementById("users");
+        usersDiv.innerHTML = "";
+        users.forEach((user, index) => {
+            usersDiv.innerHTML += `
+              <div>
+                <label for="user-${index}-name">Name:</label>
+                <input type="text" id="user-${index}-name" value="${user.name}" oninput="updateUser(${index}, 'name', this.value)">
+                <label for="user-${index}-percent">Weight (%):</label>
+                <input type="number" id="user-${index}-percent" value="${user.weight}" min="1" max="100" oninput="updateUser(${index}, 'weight', this.value)">
+                <label for="user-${index}-votes">Votes:</label>
+                <input type="text" id="user-${index}-votes" value="${user.votes}" oninput="updateUser(${index}, 'votes', this.value)">
+              </div>
+            `;
+        });
+    }
+
+
+    function updateUser(index, field, value) {
+        users[index][field] = value;
+        saveToLocalStorage();  // Save after any update to user data
+    }
+
+    function computeWinner() {
+        console.log("Computing winner...");
+        // Gather user votes and weights
+        const userVotes = users.map(user => ({
+            name: user.name,
+            weight: parseFloat(user.weight) / 100, // Convert weight percentage to a decimal factor
+            votes: user.votes.split(",").map(vote => parseInt(vote.trim()))
+        }));
+
+        if (votingChoices.length === 0) {
+            console.log("No voting choices selected.");
+            return;
+        }
+
+        // Initialize scores for each choice
+        let scores = new Map(votingChoices.map(choice => [choice, 0]));
+
+        // Compute the weighted Borda count votes for each choice
+        userVotes.forEach(user => {
+            const maxPoints = votingChoices.length - 1; // Max points for the top-ranked choice
+            user.votes.forEach((vote, index) => {
+                let choice = votingChoices[vote - 1];
+                let score = scores.get(choice) || 0;
+                // Compute Borda score, then multiply by user's weight
+                scores.set(choice, score + ((maxPoints - index) * user.weight)*100);
+            });
+        });
+
+        // Convert Map to an array and sort it
+        let sortedResults = Array.from(scores, ([choice, score]) => ({ choice, score }))
+            .sort((a, b) => b.score - a.score);
+
+        // Display the winner
+        let winner = sortedResults[0].choice;
+        document.getElementById("winner").innerHTML = `Winner: ${winner}`;
+
+        // Render results table
+        renderResultsTable(sortedResults);
+    }
+
+
+
+    function renderResultsTable(results) {
+      const tableDiv = document.getElementById("resultsTable");
+      tableDiv.innerHTML = "";  // Clear existing content
+
+      // Create a table and its header
+      let table = document.createElement('table');
+      let headerRow = document.createElement('tr');
+      let headers = ["Rank", "Choice", "Score"];
+      headers.forEach(headerText => {
+          let header = document.createElement('th');
+          header.textContent = headerText;
+          headerRow.appendChild(header);
+      });
+      table.appendChild(headerRow);
+
+      // Append rows for each result
+      results.forEach((result, index) => {
+          let row = document.createElement('tr');
+          let rankCell = document.createElement('td');
+          rankCell.textContent = index + 1;
+          row.appendChild(rankCell);
+
+          let choiceCell = document.createElement('td');
+          choiceCell.textContent = result.choice;
+          row.appendChild(choiceCell);
+
+          let scoreCell = document.createElement('td');
+          scoreCell.textContent = result.score;
+          row.appendChild(scoreCell);
+
+          table.appendChild(row);
+      });
+
+      // Append the table to the div
+      tableDiv.appendChild(table);
+  }
+
+
+
+    window.onload = function() {
+        loadFromLocalStorage();
+        renderUsers(); // Refresh user section
+        renderVotingChoices(); // Refresh voting choices
+    };
+
+  </script>
+</body>
+</html>
+
